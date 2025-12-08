@@ -1,5 +1,10 @@
-import "dotenv/config";
+import path from "path";
+import dotenv from "dotenv";
 import prisma from "../lib/prisma";
+
+// Load .env explicitly from project root
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+console.log("DATABASE_URL at startup:", process.env.DATABASE_URL);
 
 async function main() {
   console.log("Clearing existing data...");
@@ -11,6 +16,8 @@ async function main() {
   await prisma.user.deleteMany();
 
   console.log("Seeding users...");
+    console.log("DATABASE_URL =", process.env.DATABASE_URL);
+    console.log ("Hello");
 
   const adminUser = await prisma.user.create({
     data: {
