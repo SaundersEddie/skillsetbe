@@ -1,119 +1,131 @@
 import path from "path";
 import dotenv from "dotenv";
-import prisma from "../lib/prisma";
+import { Client } from "pg";
 
-// Load .env explicitly from project root
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-console.log("DATABASE_URL at startup:", process.env.DATABASE_URL);
 
 async function main() {
-  console.log("Clearing existing data...");
+  console.log("[seed] DATABASE_URL:", process.env.DATABASE_URL);
 
-  // Order matters because of foreign key constraints
-  await prisma.evidence.deleteMany();
-  await prisma.skill.deleteMany();
-  await prisma.project.deleteMany();
-  await prisma.user.deleteMany();
-
-  console.log("Seeding users...");
-    console.log("DATABASE_URL =", process.env.DATABASE_URL);
-    console.log ("Hello");
-
-  const adminUser = await prisma.user.create({
-    data: {
-      email: "admin@example.com",
-      // NOTE: this is NOT a real hash – auth is not implemented yet.
-      // We'll replace this with a proper hashed password when we add auth logic.
-      passwordHash: "CHANGE_ME_LATER",
-      role: "admin",
-    },
+  const client = new Client({
+    connectionString: process.env.DATABASE_URL,
   });
 
-  console.log("Seeding skills...");
+  await client.connect();
+  console.log("[seed] Connected to Postgres.");
 
-  const frontendSkill = await prisma.skill.create({
-    data: {
-      name: "React",
-      category: "Frontend",
-      level: 4,
-    },
-  });
+  console.log("[seed] Clearing existing data...");
+  // Reset all tables and identities, cascading to dependent rows
+  await client.query(
+    'TRUNCATE TABLE "Evidence", "Skill", "Project", "User" RESTART IDENTITY CASCADE;'
+  );
 
-  const backendSkill = await prisma.skill.create({
-    data: {
-      name: "Node.js / TypeScript",
-      category: "Backend",
-      level: 4,
-    },
-  });
+  console.log("[seed] Seeding users...");
+  const adminUserRes = await client.query(
+    `
+    INSERT INTO "User" ("email", "passwordHash", "role", "updatedAt")
+    VALUES ($1, $2, $3, NOW())
+    RETURNING "id";
+  `,
+    ["admin@example.com", "CHANGE_ME_LATER", "admin"]
+  );
+  const adminUserId: number = adminUserRes.rows[0].id;
 
-  const dbSkill = await prisma.skill.create({
-    data: {
-      name: "PostgreSQL / Prisma",
-      category: "Database",
-      level: 3,
-    },
-  });
+  console.log("[seed] Seeding skills...");
+  const frontendRes = await client.query(
+    `
+    INSERT INTO "Skill" ("name", "category", "level", "updatedAt")
+    VALUES ($1, $2, $3, NOW())
+    RETURNING "id";
+  `,
+    ["React", "Frontend", 4]
+  );
+  const frontendSkillId: number = frontendRes.rows[0].id;
 
-  console.log("Seeding projects...");
+  const backendRes = await client.query(
+    `
+    INSERT INTO "Skill" ("name", "category", "level", "updatedAt")
+    VALUES ($1, $2, $3, NOW())
+    RETURNING "id";
+  `,
+    ["Node.js / TypeScript", "Backend", 4]
+  );
+  const backendSkillId: number = backendRes.rows[0].id;
 
-  const skillTrackerProject = await prisma.project.create({
-    data: {
-      name: "SkillStacker / Skillset App",
-      desc: "Full-stack skill tracking portfolio project with React, TS backend, and PostgreSQL.",
-    },
-  });
+  const dbRes = await client.query(
+    `
+    INSERT INTO "Skill" ("name", "category", "level", "updatedAt")
+    VALUES ($1, $2, $3, NOW())
+    RETURNING "id";
+  `,
+    ["PostgreSQL / Prisma", "Database", 3]
+  );
+  const dbSkillId: number = dbRes.rows[0].id;
 
-  const mudProject = await prisma.project.create({
-    data: {
-      name: "Shattered Realms MUD",
-      desc: "Python-based MUD showcasing asynchronous networking, game loops, and data-driven world building.",
-    },
-  });
+  console.log("[seed] Seeding projects...");
+  const skillTrackerRes = await client.query(
+    `
+    INSERT INTO "Project" ("name", "desc", "updatedAt")
+    VALUES ($1, $2, NOW())
+    RETURNING "id";
+  `,
+    [
+      "SkillStacker / Skillset App",
+      "Full-stack skill tracking portfolio project with React, TS backend, and PostgreSQL.",
+    ]
+  );
+  const skillTrackerProjectId: number = skillTrackerRes.rows[0].id;
 
-  console.log("Seeding evidence...");
+  const mudProjectRes = await client.query(
+    `
+    INSERT INTO "Project" ("name", "desc", "updatedAt")
+    VALUES ($1, $2, NOW())
+    RETURNING "id";
+  `,
+    [
+      "Shattered Realms MUD",
+      "Python-based MUD showcasing async networking and data-driven world building.",
+    ]
+  );
+  const mudProjectId: number = mudProjectRes.rows[0].id;
 
-  await prisma.evidence.createMany({
-    data: [
-      {
-        userId: adminUser.id,
-        skillId: frontendSkill.id,
-        projectId: skillTrackerProject.id,
-        desc: "Built React-based frontend with Tailwind, consuming TypeScript API.",
-        link: "https://github.com/your-org/skillsetfe",
-      },
-      {
-        userId: adminUser.id,
-        skillId: backendSkill.id,
-        projectId: skillTrackerProject.id,
-        desc: "Implemented Node/Express backend in TypeScript with Prisma and unit tests.",
-        link: "https://github.com/your-org/skillsetbe",
-      },
-      {
-        userId: adminUser.id,
-        skillId: dbSkill.id,
-        projectId: skillTrackerProject.id,
-        desc: "Designed relational model in PostgreSQL and managed schema via Prisma migrations.",
-        link: "",
-      },
-      {
-        userId: adminUser.id,
-        skillId: backendSkill.id,
-        projectId: mudProject.id,
-        desc: "Showcases server-side game logic, telnet sessions, and async IO patterns.",
-        link: "https://github.com/your-org/shattered-realms-mud",
-      },
-    ],
-  });
+  console.log("[seed] Seeding evidence...");
+  await client.query(
+    `
+    INSERT INTO "Evidence" ("userId", "skillId", "projectId", "desc", "link")
+    VALUES 
+      ($1, $2, $3, $4, $5),
+      ($1, $6, $3, $7, $8),
+      ($1, $9, $3, $10, $11),
+      ($1, $6, $12, $13, $14);
+  `,
+    [
+      adminUserId, // 1
+      frontendSkillId, // 2
+      skillTrackerProjectId, // 3
+      "Built React-based frontend with Tailwind, consuming TypeScript API.", // 4
+      "https://github.com/your-org/skillsetfe", // 5
 
-  console.log("Seed data created successfully.");
+      backendSkillId, // 6
+      "Implemented Node/Express backend in TypeScript with Prisma and unit tests.", // 7
+      "https://github.com/your-org/skillsetbe", // 8
+
+      dbSkillId, // 9
+      "Designed relational model in PostgreSQL and managed schema via Prisma migrations.", // 10
+      "", // 11
+
+      mudProjectId, // 12
+      "Showcases server-side game logic, telnet sessions, and async IO patterns.", // 13
+      "https://github.com/your-org/shattered-realms-mud", // 14
+    ]
+  );
+
+  console.log("[seed] Seed data created successfully.");
+
+  await client.end();
 }
 
-main()
-  .catch((err) => {
-    console.error("Error while seeding database:", err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().catch((err) => {
+  console.error("[seed] Error while seeding database:", err);
+  process.exit(1);
+});
